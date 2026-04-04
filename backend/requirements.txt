@@ -1,0 +1,26 @@
+# Core
+flask==3.1.0
+flask-cors==5.0.1
+gunicorn==23.0.0
+
+# Data
+pandas==2.2.3
+numpy==2.2.2
+
+# ML/NLP
+sentence-transformers==3.4.1
+scikit-learn==1.6.1
+umap-learn==0.5.7
+
+# Network Analysis
+networkx==3.4.2
+python-louvain==0.16
+
+# NLP extras
+langdetect==1.0.9
+
+# GenAI
+google-generativeai==0.8.4
+
+# Utilities
+python-dotenv==1.0.1
