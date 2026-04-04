@@ -19,4 +19,6 @@ Thumbs.db
 .idea/
 *.log
 data.jsonl
+.env
+.env.*
 *.env
