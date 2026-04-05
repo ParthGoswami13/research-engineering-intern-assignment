@@ -3,7 +3,13 @@
  */
 import axios from 'axios';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
+export const getApiUrl = (path = '') => {
+  const normalizedBase = API_BASE.replace(/\/+$/, '');
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  return `${normalizedBase}${normalizedPath}`;
+};
 
 const api = axios.create({
   baseURL: API_BASE,
@@ -21,12 +27,18 @@ api.interceptors.response.use(
 );
 
 export const getOverview = () => api.get('/api/overview');
-export const getTimeseries = (granularity = 'daily', subreddit = null) => {
+export const getDashboard = () => api.get('/api/dashboard');
+export const getTimeseries = (granularity = 'daily', subreddit = null, query = '') => {
   const params = { granularity };
   if (subreddit) params.subreddit = subreddit;
+  if (query) params.q = query;
   return api.get('/api/timeseries', { params });
 };
-export const getNetwork = () => api.get('/api/network');
+export const getNetwork = (query = '', removeTopN = 0, maxNodes = 200) => {
+  const params = { remove_top_n: removeTopN, max_nodes: maxNodes };
+  if (query) params.q = query;
+  return api.get('/api/network', { params });
+};
 export const searchPosts = (q, k = 10) => api.get('/api/search', { params: { q, k } });
 export const getClusters = (k = 5) => api.get('/api/clusters', { params: { k } });
 export const getEmbeddings = (max = 2000) => api.get('/api/embeddings', { params: { max } });

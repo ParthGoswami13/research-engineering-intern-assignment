@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getClusters, getEmbeddings, getSummary } from '../api/client';
+import { getClusters, getEmbeddings, getSummary, getApiUrl } from '../api/client';
 import { ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { AlertTriangle, Pin, X, Lightbulb, ArrowUp, Box, Download, Sparkles } from 'lucide-react';
 
@@ -27,6 +27,8 @@ function TopicExplorer() {
   const [summary, setSummary] = useState('');
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [showProjectorInfo, setShowProjectorInfo] = useState(false);
+  const tensorsUrl = getApiUrl('/api/projector/tensors.tsv');
+  const metadataUrl = getApiUrl('/api/projector/metadata.tsv');
 
   const fetchClusters = async (numK) => {
     setLoading(true);
@@ -65,9 +67,9 @@ function TopicExplorer() {
     setSummaryLoading(false);
   };
 
-  const scatterData = embeddings?.points?.map((p, i) => ({
+  const scatterData = embeddings?.points?.map((p) => ({
     ...p,
-    cluster: clusters?.labels?.[i] ?? 0,
+    cluster: clusters?.labels?.[p.row_index] ?? 0,
   })) || [];
 
   const clusterGroups = {};
@@ -249,8 +251,8 @@ function TopicExplorer() {
               <h3 style={{ color: 'var(--accent-secondary)', marginBottom: 'var(--space-sm)', fontFamily: 'var(--font-serif)', fontWeight: 700 }}>TensorFlow Projector</h3>
               <p style={{ marginBottom: 'var(--space-md)', fontSize: '0.88rem', color: 'var(--text-secondary)' }}>Explore full 384D embeddings in 3D.</p>
               <ol style={{ paddingLeft: 'var(--space-lg)', fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: 'var(--space-md)', lineHeight: '2.2' }}>
-                <li>Download: <a href="http://localhost:5000/api/projector/tensors.tsv" download className="btn btn-ghost" style={{ padding: '2px 10px', fontSize: '0.72rem' }}><Download size={11} /> tensors.tsv</a></li>
-                <li>Download: <a href="http://localhost:5000/api/projector/metadata.tsv" download className="btn btn-ghost" style={{ padding: '2px 10px', fontSize: '0.72rem' }}><Download size={11} /> metadata.tsv</a></li>
+                <li>Download: <a href={tensorsUrl} download className="btn btn-ghost" style={{ padding: '2px 10px', fontSize: '0.72rem' }}><Download size={11} /> tensors.tsv</a></li>
+                <li>Download: <a href={metadataUrl} download className="btn btn-ghost" style={{ padding: '2px 10px', fontSize: '0.72rem' }}><Download size={11} /> metadata.tsv</a></li>
                 <li>Open <a href="https://projector.tensorflow.org/" target="_blank" rel="noopener noreferrer">projector.tensorflow.org</a></li>
                 <li>Load both files → explore!</li>
               </ol>

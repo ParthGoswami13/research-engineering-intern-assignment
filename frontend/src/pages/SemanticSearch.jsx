@@ -19,6 +19,32 @@ function SemanticSearch() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  const platformMeta = results?.platforms || [];
+  const groupedResults = results?.grouped_results || {};
+
+  const getPlatformLabel = (source) => {
+    const match = platformMeta.find((platform) => platform.source === source);
+    return match?.label || source.replace(/_/g, ' ');
+  };
+
+  const platformGroups = platformMeta
+    .filter((platform) => platform.count > 0 && Array.isArray(groupedResults[platform.source]))
+    .map((platform) => ({
+      source: platform.source,
+      label: platform.label,
+      items: groupedResults[platform.source],
+    }));
+
+  const fallbackGroups = platformGroups.length > 0
+    ? platformGroups
+    : [
+        {
+          source: 'all',
+          label: 'All Sources',
+          items: results?.results || [],
+        },
+      ];
+
   const handleSearch = async (searchQuery = query) => {
     const q = searchQuery || query;
     if (!q.trim()) return;
@@ -135,65 +161,98 @@ function SemanticSearch() {
             </div>
 
             <motion.div
-              style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginBottom: 'var(--space-lg)', fontFamily: 'var(--font-mono)', letterSpacing: '0.5px' }}
+              style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginBottom: 'var(--space-md)', fontFamily: 'var(--font-mono)', letterSpacing: '0.5px' }}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.2 }}
             >
-              {results.total_results} results for "{results.query}"
+              {results.total_results} results across {platformMeta.filter((p) => p.count > 0).length || 1} platform sources for "{results.query}"
             </motion.div>
 
-            {results.results?.map((result, i) => (
-              <motion.div
-                key={result.id}
-                className="result-card"
-                initial={{ opacity: 0, y: 25, x: -8 }}
-                animate={{ opacity: 1, y: 0, x: 0 }}
-                transition={{ delay: i * 0.06, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-                whileHover={{ x: 8, borderColor: 'rgba(232,168,73,0.15)' }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--space-md)' }}>
-                  <div style={{ flex: 1 }}>
-                    <div className="result-title">
-                      <a href={result.permalink} target="_blank" rel="noopener noreferrer">{result.title}</a>
-                    </div>
-                    <div className="result-meta">
-                      <span className={`sub-badge ${result.subreddit}`}>r/{result.subreddit}</span>
-                      <span>u/{result.author}</span>
-                      <span style={{display:'flex',alignItems:'center',gap:2}}><ArrowUp size={12} /> {result.score}</span>
-                      <span style={{display:'flex',alignItems:'center',gap:2}}><Calendar size={12} /> {result.created_date}</span>
-                    </div>
-                    {result.text && <div className="result-text">{result.text.slice(0, 200)}{result.text.length > 200 ? '...' : ''}</div>}
-                  </div>
-                  <motion.div
-                    style={{
-                      minWidth: 68, textAlign: 'center', padding: '12px 8px',
-                      background: result.similarity > 60 ? 'var(--accent-primary-dim)' : 'var(--accent-tertiary-dim)',
-                      borderRadius: 'var(--radius-lg)',
-                      border: `1px solid ${result.similarity > 60 ? 'rgba(232,168,73,0.15)' : 'rgba(251,113,133,0.15)'}`,
-                    }}
-                    initial={{ scale: 0.7, opacity: 0, rotate: -5 }}
-                    animate={{ scale: 1, opacity: 1, rotate: 0 }}
-                    transition={{ delay: i * 0.06 + 0.3, type: 'spring', stiffness: 300, damping: 15 }}
+            <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap', marginBottom: 'var(--space-lg)' }}>
+              {(platformMeta.length > 0 ? platformMeta : [{ source: 'all', label: 'All Sources', count: results?.total_results || 0 }])
+                .filter((platform) => platform.count > 0)
+                .map((platform, idx) => (
+                  <motion.span
+                    key={`${platform.source}-${idx}`}
+                    className="warning-badge"
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: 0.15 + idx * 0.06 }}
                   >
-                    <div style={{
-                      fontSize: '1.3rem', fontWeight: 800, fontFamily: 'var(--font-mono)',
-                      color: result.similarity > 60 ? 'var(--accent-primary)' : 'var(--accent-tertiary)',
-                      letterSpacing: '-0.5px',
-                    }}>
-                      {result.similarity}%
-                    </div>
-                    <div style={{ fontSize: '0.55rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '2px', marginTop: 3, fontWeight: 700 }}>match</div>
-                  </motion.div>
+                    {getPlatformLabel(platform.source)}: {platform.count}
+                  </motion.span>
+                ))}
+            </div>
+
+            {fallbackGroups.map((group, groupIdx) => (
+              <motion.div
+                key={`${group.source}-${groupIdx}`}
+                initial={{ opacity: 0, y: 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 + groupIdx * 0.08 }}
+              >
+                <div className="card-title" style={{ marginBottom: 'var(--space-md)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-sm)' }}>
+                  <span>{group.label}</span>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', fontFamily: 'var(--font-mono)', letterSpacing: '0.6px' }}>{group.items.length} matches</span>
                 </div>
-                <div className="similarity-bar">
-                  <motion.div
-                    className="similarity-fill"
-                    initial={{ width: 0 }}
-                    animate={{ width: `${result.similarity}%` }}
-                    transition={{ delay: i * 0.06 + 0.2, duration: 1, ease: [0.16, 1, 0.3, 1] }}
-                  />
-                </div>
+
+                {group.items.map((result, i) => {
+                  const idx = groupIdx * 100 + i;
+                  return (
+                    <motion.div
+                      key={`${group.source}-${result.id}-${i}`}
+                      className="result-card"
+                      initial={{ opacity: 0, y: 25, x: -8 }}
+                      animate={{ opacity: 1, y: 0, x: 0 }}
+                      transition={{ delay: idx * 0.03, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+                      whileHover={{ x: 8, borderColor: 'rgba(232,168,73,0.15)' }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--space-md)' }}>
+                        <div style={{ flex: 1 }}>
+                          <div className="result-title">
+                            <a href={result.permalink || result.url || '#'} target="_blank" rel="noopener noreferrer">{result.title}</a>
+                          </div>
+                          <div className="result-meta">
+                            <span className={`sub-badge ${result.subreddit}`}>r/{result.subreddit}</span>
+                            <span>u/{result.author}</span>
+                            <span style={{display:'flex',alignItems:'center',gap:2}}><ArrowUp size={12} /> {result.score}</span>
+                            <span style={{display:'flex',alignItems:'center',gap:2}}><Calendar size={12} /> {result.created_date}</span>
+                          </div>
+                          {result.text && <div className="result-text">{result.text.slice(0, 200)}{result.text.length > 200 ? '...' : ''}</div>}
+                        </div>
+                        <motion.div
+                          style={{
+                            minWidth: 68, textAlign: 'center', padding: '12px 8px',
+                            background: result.similarity > 60 ? 'var(--accent-primary-dim)' : 'var(--accent-tertiary-dim)',
+                            borderRadius: 'var(--radius-lg)',
+                            border: `1px solid ${result.similarity > 60 ? 'rgba(232,168,73,0.15)' : 'rgba(251,113,133,0.15)'}`,
+                          }}
+                          initial={{ scale: 0.7, opacity: 0, rotate: -5 }}
+                          animate={{ scale: 1, opacity: 1, rotate: 0 }}
+                          transition={{ delay: idx * 0.03 + 0.2, type: 'spring', stiffness: 300, damping: 15 }}
+                        >
+                          <div style={{
+                            fontSize: '1.3rem', fontWeight: 800, fontFamily: 'var(--font-mono)',
+                            color: result.similarity > 60 ? 'var(--accent-primary)' : 'var(--accent-tertiary)',
+                            letterSpacing: '-0.5px',
+                          }}>
+                            {result.similarity}%
+                          </div>
+                          <div style={{ fontSize: '0.55rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '2px', marginTop: 3, fontWeight: 700 }}>match</div>
+                        </motion.div>
+                      </div>
+                      <div className="similarity-bar">
+                        <motion.div
+                          className="similarity-fill"
+                          initial={{ width: 0 }}
+                          animate={{ width: `${result.similarity}%` }}
+                          transition={{ delay: idx * 0.03 + 0.15, duration: 1, ease: [0.16, 1, 0.3, 1] }}
+                        />
+                      </div>
+                    </motion.div>
+                  );
+                })}
               </motion.div>
             ))}
 

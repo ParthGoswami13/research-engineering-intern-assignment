@@ -7,6 +7,25 @@ Falls back to template-based summaries when API key is not available.
 
 import os
 import json
+import warnings
+
+
+_GENAI_MODULE = None
+
+
+def _get_genai_module():
+    """Load google.generativeai once and suppress its deprecation warning noise."""
+    global _GENAI_MODULE
+
+    if _GENAI_MODULE is not None:
+        return _GENAI_MODULE
+
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', FutureWarning)
+        import google.generativeai as genai
+
+    _GENAI_MODULE = genai
+    return _GENAI_MODULE
 
 
 def get_genai_summary(chart_type, chart_data, dataset_context=None):
@@ -27,7 +46,7 @@ def get_genai_summary(chart_type, chart_data, dataset_context=None):
         return generate_fallback_summary(chart_type, chart_data)
     
     try:
-        import google.generativeai as genai
+        genai = _get_genai_module()
         genai.configure(api_key=api_key)
         
         if not dataset_context:
@@ -131,7 +150,7 @@ def get_suggested_queries(query, results_context):
         ]
     
     try:
-        import google.generativeai as genai
+        genai = _get_genai_module()
         genai.configure(api_key=api_key)
         
         prompt = f"""A user searched a political Reddit dataset for: "{query}"

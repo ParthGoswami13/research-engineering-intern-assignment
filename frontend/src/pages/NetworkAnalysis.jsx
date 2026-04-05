@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getNetwork, getSummary } from '../api/client';
 import * as d3 from 'd3';
-import { Trophy, User, Sparkles, Lightbulb, X, Circle, GitBranch, Users, Hexagon, Award, Medal } from 'lucide-react';
+import { Search as SearchIcon, Trophy, User, Sparkles, Lightbulb, X, Award, Medal } from 'lucide-react';
 
 const COMMUNITY_COLORS = ['#e8a849', '#34d399', '#fb7185', '#22d3ee', '#a78bfa', '#f97316', '#fbbf24', '#f43f5e', '#60a5fa', '#14b8a6'];
 
@@ -19,21 +19,45 @@ const slideUp = {
 function NetworkAnalysis() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [queryInput, setQueryInput] = useState('');
+  const [query, setQuery] = useState('');
+  const [removeTopN, setRemoveTopN] = useState(0);
   const [summary, setSummary] = useState('');
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [selectedNode, setSelectedNode] = useState(null);
   const svgRef = useRef(null);
+  const stressProgress = `${(removeTopN / 5) * 100}%`;
 
   useEffect(() => {
-    getNetwork()
-      .then(res => { setData(res.data); setLoading(false); })
+    setLoading(true);
+    getNetwork(query, removeTopN)
+      .then(res => {
+        setData(res.data);
+        setSelectedNode(null);
+        setLoading(false);
+      })
       .catch(() => setLoading(false));
-  }, []);
+  }, [query, removeTopN]);
 
   useEffect(() => {
     if (!data || !svgRef.current || !data.nodes.length) return;
-    renderGraph();
+    return renderGraph();
   }, [data]);
+
+  const applyQueryFilter = () => {
+    setQuery(queryInput.trim());
+  };
+
+  const clearQueryFilter = () => {
+    setQueryInput('');
+    setQuery('');
+  };
+
+  const handleQueryKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      applyQueryFilter();
+    }
+  };
 
   const renderGraph = () => {
     const svg = d3.select(svgRef.current);
@@ -194,9 +218,12 @@ function NetworkAnalysis() {
     setSummaryLoading(true);
     try {
       const res = await getSummary('network', {
+        query,
+        remove_top_n: removeTopN,
         num_nodes: data.stats.num_nodes,
         num_edges: data.stats.num_edges,
         num_communities: data.stats.num_communities,
+        removed_nodes: data.stats.removed_nodes || [],
         top_influencer: data.top_influencers?.[0]?.id,
         top_5: data.top_influencers?.slice(0, 5).map(n => ({ id: n.id, pagerank: n.pagerank, community: n.community })),
       });
@@ -219,6 +246,73 @@ function NetworkAnalysis() {
         <h2>Network Analysis</h2>
         <p>Who is driving the conversation — <span className="serif-accent">influence network with PageRank</span></p>
       </motion.div>
+
+      <motion.div className="search-bar" style={{ marginBottom: 'var(--space-md)', maxWidth: 760 }} variants={slideUp}>
+        <span className="search-icon"><SearchIcon size={18} /></span>
+        <input
+          type="text"
+          placeholder="Filter network by keyword, phrase, or URL..."
+          value={queryInput}
+          onChange={(e) => setQueryInput(e.target.value)}
+          onKeyDown={handleQueryKeyDown}
+          id="network-query-input"
+        />
+        <motion.button className="btn btn-primary" onClick={applyQueryFilter} whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.95 }}>
+          Apply
+        </motion.button>
+        {(query || queryInput) && (
+          <motion.button className="btn btn-secondary" onClick={clearQueryFilter} whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.95 }}>
+            Clear
+          </motion.button>
+        )}
+      </motion.div>
+
+      <motion.div
+        className="network-stress-control"
+        variants={slideUp}
+        style={{ marginBottom: 'var(--space-lg)', '--stress-progress': stressProgress }}
+      >
+        <div className="network-stress-head">
+          <div>
+            <div className="network-stress-title">Stress Test: Remove top PageRank nodes</div>
+            <div className="network-stress-subtitle">Probe graph robustness by dropping high-influence nodes.</div>
+          </div>
+          <span className="network-stress-value">{removeTopN}</span>
+        </div>
+        <input
+          className="network-stress-slider"
+          type="range"
+          min="0"
+          max="5"
+          step="1"
+          value={removeTopN}
+          onChange={(e) => setRemoveTopN(parseInt(e.target.value, 10))}
+          id="network-remove-top-n-slider"
+          aria-label="Remove top PageRank nodes"
+        />
+        <div className="network-stress-scale">
+          <span>0 = baseline</span>
+          <span>5 = maximum stress</span>
+        </div>
+      </motion.div>
+
+      <div className="network-flags" style={{ marginBottom: 'var(--space-lg)' }}>
+        <AnimatePresence>
+          {query && (
+            <motion.div className="warning-badge network-flag" initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
+              Filter: "{query}"
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {data?.stats?.removed_nodes?.length > 0 && (
+            <motion.div className="warning-badge network-flag" initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
+              Removed influencers: {data.stats.removed_nodes.join(', ')}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
 
       <motion.div className="stats-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }} variants={container}>
         {[

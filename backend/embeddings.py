@@ -5,12 +5,68 @@ Model: all-MiniLM-L6-v2 (80MB, 384-dim, CPU-friendly)
 """
 
 import os
+import logging
+import warnings
+
 import numpy as np
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), '..', 'models')
 EMBEDDINGS_PATH = os.path.join(MODELS_DIR, 'embeddings.npy')
 EMBEDDINGS_2D_PATH = os.path.join(MODELS_DIR, 'embeddings_2d.npy')
 MODEL_NAME = 'sentence-transformers/all-MiniLM-L6-v2'
+_EMBEDDING_MODEL = None
+
+
+def _configure_hf_runtime():
+    """Reduce noisy runtime logs from Hugging Face and Transformers."""
+    os.environ.setdefault('HF_HUB_DISABLE_PROGRESS_BARS', '1')
+    os.environ.setdefault('HF_HUB_VERBOSITY', 'error')
+    os.environ.setdefault('TRANSFORMERS_VERBOSITY', 'error')
+    os.environ.setdefault('TOKENIZERS_PARALLELISM', 'false')
+    logging.getLogger('huggingface_hub').setLevel(logging.ERROR)
+    logging.getLogger('huggingface_hub.utils._http').setLevel(logging.ERROR)
+    logging.getLogger('transformers').setLevel(logging.ERROR)
+    logging.getLogger('sentence_transformers').setLevel(logging.ERROR)
+
+    try:
+        from huggingface_hub.utils import logging as hf_logging
+        hf_logging.set_verbosity_error()
+    except Exception:
+        # Safe fallback: search should still work even if hub logging API changes.
+        pass
+
+    try:
+        from transformers.utils import logging as transformers_logging
+        transformers_logging.set_verbosity_error()
+    except Exception:
+        # Safe fallback: search should still work even if transformers logging API changes.
+        pass
+
+
+def _get_embedding_model():
+    """Load sentence-transformer model once per process and reuse it."""
+    global _EMBEDDING_MODEL
+
+    if _EMBEDDING_MODEL is not None:
+        return _EMBEDDING_MODEL
+
+    _configure_hf_runtime()
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            'ignore',
+            message='You are sending unauthenticated requests to the HF Hub.*',
+        )
+        from sentence_transformers import SentenceTransformer
+        _EMBEDDING_MODEL = SentenceTransformer(MODEL_NAME)
+
+    return _EMBEDDING_MODEL
+
+
+def encode_query(query):
+    """Encode one search query to a normalized embedding."""
+    model = _get_embedding_model()
+    return model.encode([query], normalize_embeddings=True, show_progress_bar=False)[0]
 
 
 def generate_embeddings(texts, force=False):
@@ -35,9 +91,7 @@ def generate_embeddings(texts, force=False):
         print(f"Cache size mismatch ({embs.shape[0]} vs {len(texts)}), regenerating...")
     
     print(f"Generating embeddings for {len(texts)} texts...")
-    from sentence_transformers import SentenceTransformer
-    
-    model = SentenceTransformer(MODEL_NAME)
+    model = _get_embedding_model()
     embeddings = model.encode(
         texts, 
         batch_size=64, 
@@ -124,7 +178,7 @@ def generate_2d_projection(embeddings, method='pca', force=False):
     return coords_2d
 
 
-def semantic_search(query, corpus_embeddings, top_k=10):
+def semantic_search(query, corpus_embeddings, top_k=10, query_embedding=None):
     """
     Find the most semantically similar texts to a query.
     
@@ -136,10 +190,8 @@ def semantic_search(query, corpus_embeddings, top_k=10):
     Returns:
         list of (index, similarity_score) tuples, sorted by score descending
     """
-    from sentence_transformers import SentenceTransformer
-    
-    model = SentenceTransformer(MODEL_NAME)
-    query_embedding = model.encode([query], normalize_embeddings=True)[0]
+    if query_embedding is None:
+        query_embedding = encode_query(query)
     
     # Cosine similarity (embeddings are normalized, so dot product = cosine sim)
     similarities = np.dot(corpus_embeddings, query_embedding)

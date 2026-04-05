@@ -26,14 +26,23 @@ def build_network(df):
         networkx.DiGraph with nodes (authors) and weighted edges
     """
     G = nx.DiGraph()
+
+    def is_valid_actor(value):
+        if value is None:
+            return False
+        actor = str(value).strip()
+        if not actor or actor.lower() == 'nan':
+            return False
+        if actor in {'[deleted]', 'AutoModerator'}:
+            return False
+        return True
     
     # 1. Crosspost edges: author -> crosspost_from_author
     crosspost_edges = defaultdict(int)
     for _, row in df.iterrows():
-        if row.get('crosspost_from_author') and row['author'] != row['crosspost_from_author']:
-            author = str(row['author'])
-            source = str(row['crosspost_from_author'])
-            if author and source and author != '[deleted]' and source != '[deleted]':
+        author = str(row.get('author', '')).strip()
+        source = str(row.get('crosspost_from_author', '')).strip()
+        if author != source and is_valid_actor(author) and is_valid_actor(source):
                 crosspost_edges[(author, source)] += 1
     
     for (src, tgt), weight in crosspost_edges.items():
@@ -47,7 +56,7 @@ def build_network(df):
     for _, row in df.iterrows():
         author = str(row.get('author', ''))
         sub = str(row.get('subreddit', ''))
-        if author and author != '[deleted]' and author != 'AutoModerator':
+        if is_valid_actor(author):
             sub_authors[sub].add(author)
     
     # Create co-posting edges (undirected, add both directions)
@@ -76,8 +85,7 @@ def build_network(df):
         author = str(row.get('author', ''))
         if (domain and author and 
             not domain.startswith('self.') and 
-            author != '[deleted]' and 
-            author != 'AutoModerator'):
+            is_valid_actor(author)):
             domain_authors[domain].add(author)
     
     for domain, authors in domain_authors.items():
@@ -136,7 +144,7 @@ def detect_communities(G):
     return partition
 
 
-def get_network_data(df, max_nodes=200):
+def get_network_data(df, max_nodes=200, remove_top_n=0):
     """
     Full network analysis pipeline.
     
@@ -152,6 +160,19 @@ def get_network_data(df, max_nodes=200):
         top_nodes = sorted(degree_dict, key=degree_dict.get, reverse=True)[:max_nodes]
         G = G.subgraph(top_nodes).copy()
     
+    remove_top_n = max(0, int(remove_top_n))
+    removed_nodes = []
+
+    # Optional stress-test: remove top central nodes before computing final metrics
+    if remove_top_n > 0 and len(G) > 0:
+        base_pagerank = compute_pagerank(G)
+        removed_nodes = sorted(
+            base_pagerank,
+            key=base_pagerank.get,
+            reverse=True
+        )[:remove_top_n]
+        G.remove_nodes_from(removed_nodes)
+
     # Skip PageRank for very small graphs
     if len(G) < 3:
         return {
@@ -163,6 +184,7 @@ def get_network_data(df, max_nodes=200):
             'stats': {
                 'num_nodes': len(G),
                 'num_edges': G.number_of_edges(),
+                'removed_nodes': removed_nodes,
                 'message': 'Not enough interaction data to build a network'
             }
         }
@@ -212,6 +234,7 @@ def get_network_data(df, max_nodes=200):
             'num_edges': len(edges_list),
             'num_communities': len(set(communities.values())) if communities else 0,
             'num_components': len(components),
+            'removed_nodes': removed_nodes,
             'components': [
                 {'size': len(c), 'label': f'Component {i+1}'}
                 for i, c in enumerate(sorted(components, key=len, reverse=True)[:5])

@@ -23,16 +23,35 @@ from data_loader import load_dataframe, get_dataset_summary
 from embeddings import generate_embeddings, load_embeddings, generate_2d_projection, semantic_search
 from clustering import get_cluster_data
 from network import get_network_data
+from platform_search import run_unified_platform_search
+from dashboard_insights import build_dashboard_payload
 from summarizer import get_genai_summary, get_suggested_queries
 
+
+def _get_cors_origins():
+    """Get allowed CORS origins from env or local defaults."""
+    raw = os.environ.get('CORS_ORIGINS', '').strip()
+    if raw:
+        return [origin.strip() for origin in raw.split(',') if origin.strip()]
+
+    return [
+        'http://localhost:5173',
+        'http://127.0.0.1:5173',
+        'http://localhost:4173',
+        'http://127.0.0.1:4173',
+    ]
+
+
 app = Flask(__name__)
-CORS(app, origins=['*'])  # Updated to specific origin for production
+CORS(app, origins=_get_cors_origins())
 
 # Global state (loaded at startup)
 df = None
 embeddings_cache = None
 embeddings_2d_cache = None
 network_cache = None
+dashboard_cache = None
+initialization_error = None
 
 
 def _safe_text(value, max_len=None):
@@ -57,39 +76,141 @@ def _safe_int(value, default=0):
         return default
 
 
+def _filter_posts_by_query(frame, query):
+    """Filter rows by query across text and URL/domain fields."""
+    q = (query or '').strip().lower()
+    if not q:
+        return frame
+
+    contains_q = pd.Series(False, index=frame.index)
+    for field in ['clean_text', 'title', 'selftext', 'domain', 'url']:
+        if field in frame.columns:
+            contains_q = contains_q | (
+                frame[field]
+                .fillna('')
+                .astype(str)
+                .str.lower()
+                .str.contains(q, regex=False)
+            )
+
+    return frame[contains_q].copy()
+
+
+def _is_ready():
+    return (
+        df is not None and
+        embeddings_cache is not None and
+        embeddings_2d_cache is not None and
+        network_cache is not None
+    )
+
+
+def _unavailable_response():
+    return jsonify({
+        'error': 'Data not loaded',
+        'detail': initialization_error or 'Initialization failed. Check backend logs.'
+    }), 503
+
+
+def _serialize_search_result(row_index, similarity_score, platform_source='reddit', platform_label='Reddit'):
+    """Convert search match + dataframe row into API response shape."""
+    row = df.iloc[row_index]
+    permalink = _safe_text(row.get('permalink'))
+    reddit_permalink = f"https://reddit.com{permalink}" if permalink else ''
+    source_url = _safe_text(row.get('url'))
+
+    # External-web grouped results should open the external link when present.
+    if platform_source == 'external_web' and source_url:
+        primary_link = source_url
+    else:
+        primary_link = reddit_permalink or source_url
+
+    return {
+        'id': _safe_text(row.get('id')),
+        'title': _safe_text(row.get('title')),
+        'text': _safe_text(row.get('selftext'), 500),
+        'clean_text': _safe_text(row.get('clean_text'), 300),
+        'author': _safe_text(row.get('author')),
+        'subreddit': _safe_text(row.get('subreddit')),
+        'score': _safe_int(row.get('score')),
+        'created_date': _safe_text(row.get('created_date')),
+        'similarity': round(similarity_score * 100, 1),
+        'platform_source': platform_source,
+        'platform_label': platform_label,
+        'domain': _safe_text(row.get('domain')),
+        'url': source_url,
+        'reddit_permalink': reddit_permalink,
+        'permalink': primary_link,
+    }
+
+
 def initialize():
     """Load data and precompute ML results at startup."""
-    global df, embeddings_cache, embeddings_2d_cache, network_cache
+    global df, embeddings_cache, embeddings_2d_cache, network_cache, dashboard_cache, initialization_error
+
+    if _is_ready():
+        return
     
     print("=" * 60)
     print("NarrativeTrace - Initializing...")
     print("=" * 60)
     
     # Step 1: Load and clean data
-    print("\n[1/4] Loading dataset...")
+    print("\n[1/5] Loading dataset...")
     df = load_dataframe()
     print(f"  Dataset: {len(df)} posts")
     
     # Step 2: Generate embeddings
-    print("\n[2/4] Loading/generating embeddings...")
+    print("\n[2/5] Loading/generating embeddings...")
     texts = df['clean_text'].tolist()
     embeddings_cache = generate_embeddings(texts)
     print(f"  Embeddings shape: {embeddings_cache.shape}")
     
     # Step 3: Generate 2D projections
-    print("\n[3/4] Loading/generating 2D projections...")
+    print("\n[3/5] Loading/generating 2D projections...")
     embeddings_2d_cache = generate_2d_projection(embeddings_cache, method='pca')
     print(f"  2D projections shape: {embeddings_2d_cache.shape}")
     
     # Step 4: Build network
-    print("\n[4/4] Building network graph...")
+    print("\n[4/5] Building network graph...")
     network_cache = get_network_data(df)
     print(f"  Network: {network_cache['stats']['num_nodes']} nodes, "
           f"{network_cache['stats']['num_edges']} edges")
+
+    print("\n[5/5] Preparing dashboard insights cache...")
+    try:
+        dashboard_cache = build_dashboard_payload(
+            df,
+            embeddings_cache,
+            network_cache,
+            default_k=6,
+        )
+        print("  Dashboard cache ready")
+    except Exception as exc:
+        dashboard_cache = None
+        print(f"  Dashboard cache fallback (lazy build): {exc}")
     
     print("\n" + "=" * 60)
     print("NarrativeTrace - Ready!")
     print("=" * 60)
+
+    initialization_error = None
+
+
+def ensure_initialized():
+    """Initialize app state if needed and report availability."""
+    global initialization_error
+
+    if _is_ready():
+        return True
+
+    try:
+        initialize()
+        return _is_ready()
+    except Exception as exc:
+        initialization_error = str(exc)
+        print(f"Initialization error: {exc}")
+        return False
 
 
 # ============================================================
@@ -99,10 +220,13 @@ def initialize():
 @app.route('/api/health', methods=['GET'])
 def health():
     """Health check endpoint."""
+    ready = ensure_initialized()
     return jsonify({
-        'status': 'ok',
+        'status': 'ok' if ready else 'degraded',
         'posts_loaded': len(df) if df is not None else 0,
         'embeddings_loaded': embeddings_cache is not None,
+        'dashboard_cached': dashboard_cache is not None,
+        'initialization_error': initialization_error,
     })
 
 
@@ -112,30 +236,75 @@ def overview():
     Dataset overview stats.
     Returns: total posts, date range, top subreddits, top authors, etc.
     """
-    if df is None:
-        return jsonify({'error': 'Data not loaded'}), 503
+    if not ensure_initialized():
+        return _unavailable_response()
     
     summary = get_dataset_summary(df)
     return jsonify(summary)
 
 
+@app.route('/api/dashboard', methods=['GET'])
+def dashboard():
+    """
+    Consolidated dashboard insights payload for fast frontend loading.
+    Returns precomputed/cached evidence data and chart-ready series.
+    """
+    if not ensure_initialized():
+        return _unavailable_response()
+
+    global dashboard_cache
+
+    refresh = request.args.get('refresh', '0').strip() == '1'
+    if dashboard_cache is None or refresh:
+        try:
+            dashboard_cache = build_dashboard_payload(
+                df,
+                embeddings_cache,
+                network_cache,
+                default_k=6,
+            )
+        except Exception as exc:
+            return jsonify({
+                'error': 'Unable to build dashboard insights',
+                'detail': str(exc),
+            }), 500
+
+    return jsonify(dashboard_cache)
+
+
 @app.route('/api/timeseries', methods=['GET'])
 def timeseries():
     """
-    Time-series post counts with optional granularity.
+    Time-series post counts with optional granularity and query filter.
     Query params:
         - granularity: 'daily', 'weekly', 'monthly' (default: 'daily')
         - subreddit: filter by subreddit (optional)
+        - q: keyword/phrase/URL filter (optional)
     """
-    if df is None:
-        return jsonify({'error': 'Data not loaded'}), 503
+    if not ensure_initialized():
+        return _unavailable_response()
     
     granularity = request.args.get('granularity', 'daily')
     subreddit = request.args.get('subreddit', None)
+    query = request.args.get('q', '').strip()
     
     filtered = df.copy()
     if subreddit:
         filtered = filtered[filtered['subreddit'] == subreddit]
+    if query:
+        filtered = _filter_posts_by_query(filtered, query)
+
+    if filtered.empty:
+        return jsonify({
+            'timeseries': [],
+            'by_subreddit': [],
+            'spikes': [],
+            'peak': {'date': None, 'count': 0},
+            'granularity': granularity,
+            'query': query,
+            'total_posts': 0,
+            'message': 'No posts matched the current filters.'
+        })
     
     filtered['date'] = pd.to_datetime(filtered['created_date'])
     
@@ -190,6 +359,7 @@ def timeseries():
         'spikes': spikes,
         'peak': {'date': peak_date, 'count': peak_count},
         'granularity': granularity,
+        'query': query,
         'total_posts': len(filtered)
     }
     
@@ -201,11 +371,45 @@ def network():
     """
     Network graph data with PageRank and communities.
     Returns: nodes, edges, top influencers, community stats.
+
+    Query params:
+        - q: keyword/phrase/URL filter (optional)
+        - remove_top_n: remove top N PageRank nodes before rendering (default: 0)
+        - max_nodes: cap graph size for rendering (default: 200)
     """
-    if network_cache is None:
-        return jsonify({'error': 'Network not computed'}), 503
-    
-    return jsonify(network_cache)
+    if not ensure_initialized():
+        return _unavailable_response()
+
+    query = request.args.get('q', '').strip()
+    remove_top_n = _safe_int(request.args.get('remove_top_n', 0), default=0)
+    max_nodes = _safe_int(request.args.get('max_nodes', 200), default=200)
+
+    remove_top_n = max(0, remove_top_n)
+    max_nodes = max(50, min(max_nodes, 1000))
+
+    if query or remove_top_n > 0:
+        scoped_df = _filter_posts_by_query(df, query)
+        dynamic_network = get_network_data(
+            scoped_df,
+            max_nodes=max_nodes,
+            remove_top_n=remove_top_n
+        )
+        dynamic_network['query'] = query
+        dynamic_network['filters'] = {
+            'remove_top_n': remove_top_n,
+            'max_nodes': max_nodes,
+            'source_posts': len(scoped_df)
+        }
+        return jsonify(dynamic_network)
+
+    cached = dict(network_cache)
+    cached['query'] = ''
+    cached['filters'] = {
+        'remove_top_n': 0,
+        'max_nodes': max_nodes,
+        'source_posts': len(df)
+    }
+    return jsonify(cached)
 
 
 @app.route('/api/search', methods=['GET'])
@@ -216,8 +420,8 @@ def search():
         - q: search query (required)
         - k: number of results (default: 10)
     """
-    if df is None or embeddings_cache is None:
-        return jsonify({'error': 'Data not loaded'}), 503
+    if not ensure_initialized():
+        return _unavailable_response()
     
     query = request.args.get('q', '').strip()
     top_k = int(request.args.get('k', 10))
@@ -226,6 +430,8 @@ def search():
     if not query:
         return jsonify({
             'results': [],
+            'grouped_results': {},
+            'platforms': [],
             'query': '',
             'message': 'Type something to search',
             'suggested_queries': []
@@ -245,42 +451,44 @@ def search():
     except Exception:
         lang = 'en'
     
-    # Perform semantic search
-    results = semantic_search(query, embeddings_cache, top_k=top_k)
-    
-    # Build response
-    search_results = []
-    for idx, score in results:
-        row = df.iloc[idx]
-        permalink = _safe_text(row.get('permalink'))
-        search_results.append({
-            'id': _safe_text(row.get('id')),
-            'title': _safe_text(row.get('title')),
-            'text': _safe_text(row.get('selftext'), 500),
-            'clean_text': _safe_text(row.get('clean_text'), 300),
-            'author': _safe_text(row.get('author')),
-            'subreddit': _safe_text(row.get('subreddit')),
-            'score': _safe_int(row.get('score')),
-            'created_date': _safe_text(row.get('created_date')),
-            'similarity': round(score * 100, 1),  # as percentage
-            'permalink': f"https://reddit.com{permalink}" if permalink else '',
-        })
+    # Perform semantic search across multiple platform adapters.
+    unified = run_unified_platform_search(query, df, embeddings_cache, top_k=top_k)
+
+    grouped_results = {}
+    flat_results = []
+
+    for source_key, matches in unified['grouped'].items():
+        serialized = [
+            _serialize_search_result(
+                row_index=match.row_index,
+                similarity_score=match.similarity,
+                platform_source=match.source,
+                platform_label=match.label,
+            )
+            for match in matches
+        ]
+        grouped_results[source_key] = serialized
+        flat_results.extend(serialized)
+
+    flat_results.sort(key=lambda item: item['similarity'], reverse=True)
     
     # Low confidence warning
-    if search_results and search_results[0]['similarity'] < 40:
+    if flat_results and flat_results[0]['similarity'] < 40:
         warnings.append('Low confidence results. The query may not closely match any posts in the dataset.')
     
     # Generate suggested follow-up queries
-    results_context = ', '.join([r['title'][:50] for r in search_results[:3]])
+    results_context = ', '.join([r['title'][:50] for r in flat_results[:3]])
     suggested = get_suggested_queries(query, results_context)
     
     return jsonify({
-        'results': search_results,
+        'results': flat_results,
+        'grouped_results': grouped_results,
+        'platforms': unified['platforms'],
         'query': query,
         'language': lang if lang != 'en' else None,
         'warnings': warnings,
         'suggested_queries': suggested,
-        'total_results': len(search_results)
+        'total_results': len(flat_results)
     })
 
 
@@ -291,8 +499,8 @@ def clusters():
     Query params:
         - k: number of clusters (default: 5, range: 2-20)
     """
-    if df is None or embeddings_cache is None:
-        return jsonify({'error': 'Data not loaded'}), 503
+    if not ensure_initialized():
+        return _unavailable_response()
     
     k = int(request.args.get('k', 5))
     
@@ -336,8 +544,8 @@ def embeddings_2d():
     2D embedding coordinates for scatter plot visualization.
     Returns: list of {x, y, cluster, subreddit, ...} for each post.
     """
-    if df is None or embeddings_2d_cache is None:
-        return jsonify({'error': 'Data not loaded'}), 503
+    if not ensure_initialized():
+        return _unavailable_response()
     
     # Subsample if too many points
     max_points = int(request.args.get('max', 2000))
@@ -353,6 +561,7 @@ def embeddings_2d():
         points.append({
             'x': float(embeddings_2d_cache[idx, 0]),
             'y': float(embeddings_2d_cache[idx, 1]),
+            'row_index': int(idx),
             'subreddit': df.iloc[idx]['subreddit'],
             'title': df.iloc[idx]['title'][:80],
             'author': df.iloc[idx]['author'],
@@ -398,14 +607,16 @@ def get_posts():
     Query params:
         - subreddit: filter by subreddit
         - date: filter by date
+        - q: keyword/phrase/URL filter
         - limit: max results (default: 20)
         - offset: pagination offset
     """
-    if df is None:
-        return jsonify({'error': 'Data not loaded'}), 503
+    if not ensure_initialized():
+        return _unavailable_response()
     
     subreddit = request.args.get('subreddit', None)
     date = request.args.get('date', None)
+    query = request.args.get('q', '').strip()
     limit = int(request.args.get('limit', 20))
     offset = int(request.args.get('offset', 0))
     
@@ -414,6 +625,8 @@ def get_posts():
         filtered = filtered[filtered['subreddit'] == subreddit]
     if date:
         filtered = filtered[filtered['created_date'] == date]
+    if query:
+        filtered = _filter_posts_by_query(filtered, query)
     
     total = len(filtered)
     filtered = filtered.sort_values('score', ascending=False).iloc[offset:offset + limit]
@@ -457,9 +670,10 @@ def get_projector_file(filename):
 # Main
 # ============================================================
 
+if os.environ.get('FLASK_SKIP_INIT', 'false').lower() != 'true':
+    ensure_initialized()
+
 if __name__ == '__main__':
-    initialize()
-    
     port = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('FLASK_DEBUG', 'true').lower() == 'true'
     

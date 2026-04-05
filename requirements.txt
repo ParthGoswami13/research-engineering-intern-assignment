@@ -1,0 +1,29 @@
+# ==========================================
+# NarrativeTrace - Python Dependencies
+# ==========================================
+
+# --- Web Framework ---
+flask
+flask-cors
+gunicorn
+
+# --- Data Processing ---
+pandas
+numpy
+
+# --- ML / NLP ---
+sentence-transformers
+scikit-learn
+
+# --- Network Analysis ---
+networkx
+python-louvain
+
+# --- Language Detection ---
+langdetect
+
+# --- GenAI (Gemini) ---
+google-generativeai
+
+# --- Utilities ---
+python-dotenv

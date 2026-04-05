@@ -2,14 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getTimeseries, getSummary, getPosts } from '../api/client';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts';
-import { Sparkles, Lightbulb, Flame, ClipboardList, ArrowUp, MessageSquare, X } from 'lucide-react';
-
-const SUB_COLORS = {
-  neoliberal: '#e8a849', politics: '#34d399', worldpolitics: '#22d3ee',
-  socialism: '#f43f5e', Liberal: '#a78bfa', Conservative: '#f97316',
-  Anarchism: '#71717a', democrats: '#60a5fa', Republican: '#ef4444',
-  PoliticalDiscussion: '#fbbf24'
-};
+import { Search as SearchIcon, Lightbulb, Flame, ClipboardList, ArrowUp, MessageSquare, X } from 'lucide-react';
 
 const container = {
   hidden: { opacity: 0 },
@@ -50,39 +43,68 @@ function TrendAnalysis() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [granularity, setGranularity] = useState('daily');
+  const [queryInput, setQueryInput] = useState('');
+  const [query, setQuery] = useState('');
   const [summary, setSummary] = useState('');
   const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState('');
   const [selectedSpike, setSelectedSpike] = useState(null);
   const [spikePosts, setSpikePosts] = useState([]);
 
   useEffect(() => {
     setLoading(true);
-    getTimeseries(granularity)
-      .then(res => { setData(res.data); setLoading(false); })
+    getTimeseries(granularity, null, query)
+      .then(res => {
+        setData(res.data);
+        setSelectedSpike(null);
+        setSpikePosts([]);
+        setLoading(false);
+      })
       .catch(() => setLoading(false));
-  }, [granularity]);
+  }, [granularity, query]);
 
-  const fetchSummary = async () => {
+  useEffect(() => {
     if (!data) return;
+
     setSummaryLoading(true);
-    try {
-      const res = await getSummary('time_series', {
-        total_posts: data.total_posts,
-        peak_date: data.peak?.date,
-        peak_count: data.peak?.count,
-        num_spikes: data.spikes?.length,
-        granularity,
-        spikes: data.spikes?.slice(0, 5),
-      });
-      setSummary(res.data.summary);
-    } catch { setSummary('Summary unavailable.'); }
-    setSummaryLoading(false);
+    setSummaryError('');
+
+    getSummary('time_series', {
+      total_posts: data.total_posts,
+      peak_date: data.peak?.date,
+      peak_count: data.peak?.count,
+      num_spikes: data.spikes?.length,
+      granularity,
+      query,
+      spikes: data.spikes?.slice(0, 5),
+    })
+      .then((res) => setSummary(res.data.summary))
+      .catch(() => {
+        setSummary('');
+        setSummaryError('Summary unavailable for the current filter.');
+      })
+      .finally(() => setSummaryLoading(false));
+  }, [data, granularity, query]);
+
+  const applyQueryFilter = () => {
+    setQuery(queryInput.trim());
+  };
+
+  const clearQueryFilter = () => {
+    setQueryInput('');
+    setQuery('');
+  };
+
+  const handleQueryKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      applyQueryFilter();
+    }
   };
 
   const handleSpikeClick = async (spike) => {
     setSelectedSpike(spike);
     try {
-      const res = await getPosts({ date: spike.date, limit: 5 });
+      const res = await getPosts({ date: spike.date, limit: 5, q: query });
       setSpikePosts(res.data.posts);
     } catch { setSpikePosts([]); }
   };
@@ -95,6 +117,26 @@ function TrendAnalysis() {
       <motion.div className="page-header" variants={slideUp}>
         <h2>Trend Analysis</h2>
         <p>How the conversation evolved across <span className="serif-accent">political subreddits</span></p>
+      </motion.div>
+
+      <motion.div className="search-bar" style={{ marginBottom: 'var(--space-md)', maxWidth: 760 }} variants={slideUp}>
+        <span className="search-icon"><SearchIcon size={18} /></span>
+        <input
+          type="text"
+          placeholder="Filter timeline by keyword, phrase, or URL..."
+          value={queryInput}
+          onChange={(e) => setQueryInput(e.target.value)}
+          onKeyDown={handleQueryKeyDown}
+          id="trend-query-input"
+        />
+        <motion.button className="btn btn-primary" onClick={applyQueryFilter} whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.95 }}>
+          Apply
+        </motion.button>
+        {(query || queryInput) && (
+          <motion.button className="btn btn-secondary" onClick={clearQueryFilter} whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.95 }}>
+            Clear
+          </motion.button>
+        )}
       </motion.div>
 
       <motion.div variants={slideUp} style={{ display: 'flex', gap: 'var(--space-md)', marginBottom: 'var(--space-lg)', alignItems: 'center' }}>
@@ -114,61 +156,61 @@ function TrendAnalysis() {
         <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem', fontFamily: 'var(--font-mono)', letterSpacing: '0.5px' }}>
           {data.total_posts?.toLocaleString()} posts
         </span>
+        {query && (
+          <span className="warning-badge">
+            Filter: "{query}"
+          </span>
+        )}
       </motion.div>
 
       <motion.div className="chart-container" variants={slideUp}>
         <div className="card-header">
           <span className="card-title">Post Volume Over Time</span>
-          <motion.button
-            className="btn btn-primary"
-            onClick={fetchSummary}
-            disabled={summaryLoading}
-            whileHover={{ scale: 1.04, y: -2 }}
-            whileTap={{ scale: 0.96 }}
-          >
-            {summaryLoading ? (
-              <span className="ai-thinking-dots"><span /><span /><span /></span>
-            ) : <><Sparkles size={14} /> Analyze</>}
-          </motion.button>
+          <span style={{ color: 'var(--text-muted)', fontSize: '0.72rem', fontFamily: 'var(--font-mono)', letterSpacing: '0.5px' }}>
+            {summaryLoading ? 'Generating dynamic GenAI summary...' : 'Dynamic GenAI summary'}
+          </span>
         </div>
-        <ResponsiveContainer width="100%" height={360}>
-          <AreaChart data={data.timeseries}>
-            <defs>
-              <linearGradient id="lineWarm" x1="0" y1="0" x2="1" y2="0">
-                <stop offset="0%" stopColor="#e8a849" />
-                <stop offset="100%" stopColor="#fb7185" />
-              </linearGradient>
-              <linearGradient id="areaWarm" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#e8a849" stopOpacity={0.15} />
-                <stop offset="100%" stopColor="#e8a849" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" />
-            <XAxis dataKey="period" tick={{ fontSize: 10, fill: '#53535f', fontFamily: 'JetBrains Mono' }} interval="preserveStartEnd" />
-            <YAxis tick={{ fontSize: 10, fill: '#53535f', fontFamily: 'JetBrains Mono' }} />
-            <Tooltip content={<CustomTooltip />} />
-            <Area type="monotone" dataKey="count" stroke="url(#lineWarm)" strokeWidth={2.5} fill="url(#areaWarm)"
-              name="Posts" animationDuration={2000} animationEasing="ease-out" />
-            <Line type="monotone" dataKey="avg_score" stroke="#34d399" strokeWidth={1.5}
-              dot={false} name="Avg Score" strokeDasharray="5 5" strokeOpacity={0.6}
-              yAxisId={0} animationDuration={2200} />
-          </AreaChart>
-        </ResponsiveContainer>
+        {data.timeseries?.length ? (
+          <ResponsiveContainer width="100%" height={360}>
+            <AreaChart data={data.timeseries}>
+              <defs>
+                <linearGradient id="lineWarm" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stopColor="#e8a849" />
+                  <stop offset="100%" stopColor="#fb7185" />
+                </linearGradient>
+                <linearGradient id="areaWarm" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#e8a849" stopOpacity={0.15} />
+                  <stop offset="100%" stopColor="#e8a849" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" />
+              <XAxis dataKey="period" tick={{ fontSize: 10, fill: '#53535f', fontFamily: 'JetBrains Mono' }} interval="preserveStartEnd" />
+              <YAxis tick={{ fontSize: 10, fill: '#53535f', fontFamily: 'JetBrains Mono' }} />
+              <Tooltip content={<CustomTooltip />} />
+              <Area type="monotone" dataKey="count" stroke="url(#lineWarm)" strokeWidth={2.5} fill="url(#areaWarm)"
+                name="Posts" animationDuration={2000} animationEasing="ease-out" />
+              <Line type="monotone" dataKey="avg_score" stroke="#34d399" strokeWidth={1.5}
+                dot={false} name="Avg Score" strokeDasharray="5 5" strokeOpacity={0.6}
+                yAxisId={0} animationDuration={2200} />
+            </AreaChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="error-message">No time-series points available for the current filter.</div>
+        )}
 
-        <AnimatePresence>
-          {summary && (
-            <motion.div
-              className="summary-panel"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-            >
-              <div className="summary-header"><Lightbulb size={14} /> AI Analysis</div>
-              <div className="summary-text">{summary}</div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {(summaryLoading || summary || summaryError) && (
+          <motion.div
+            className="summary-panel"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <div className="summary-header"><Lightbulb size={14} /> AI Analysis</div>
+            <div className="summary-text">
+              {summaryLoading ? 'Generating a plain-language explanation from the current chart data...' : (summaryError || summary)}
+            </div>
+          </motion.div>
+        )}
       </motion.div>
 
       <AnimatePresence>
