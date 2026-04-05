@@ -1,0 +1,13 @@
+{
+  "embeddings": [
+    {
+      "tensorName": "NarrativeTrace Embeddings",
+      "tensorShape": [
+        5000,
+        384
+      ],
+      "tensorPath": "tensors.tsv",
+      "metadataPath": "metadata.tsv"
+    }
+  ]
+}
