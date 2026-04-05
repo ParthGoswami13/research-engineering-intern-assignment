@@ -14,29 +14,29 @@ This implementation combines time-series analysis, semantic retrieval, network c
 
 ## 2. Public Hosting Proof
 
-Fill these values before final submission:
+Current deployed links:
 
-- Frontend dashboard URL: ADD_PUBLIC_FRONTEND_URL
-- Backend API base URL: ADD_PUBLIC_BACKEND_URL
-- Backend health check: ADD_PUBLIC_BACKEND_URL/api/health
+- Frontend dashboard URL: https://research-engineering-intern-assignm-theta.vercel.app
+- Backend API base URL: https://research-engineering-intern-assignment-pumd.onrender.com
+- Backend health check: https://research-engineering-intern-assignment-pumd.onrender.com/api/health
 - Video walkthrough URL (YouTube/Drive): ADD_VIDEO_URL
-
-Submission checklist for this section:
-
-- [ ] Frontend URL opens without authentication
-- [ ] Backend health endpoint returns status JSON
-- [ ] Frontend can query backend in deployed environment
-- [ ] Video walkthrough link is public
 
 ## 3. Screenshots
 
-Add final screenshots before submission:
+### Overview page
+![Overview](screenshots/overview.png)
 
-1. Overview page
-2. Trend Analysis with query filter + GenAI summary
-3. Network Analysis with node-removal stress test
-4. Semantic Search results with warnings/suggestions
-5. Topic Explorer with cluster slider and embedding scatter
+### Trend Analysis
+![Trend Analysis](screenshots/trends.png)
+
+### Network Analysis
+![Network Analysis](screenshots/network.png)
+
+### Semantic Search
+![Semantic Search](screenshots/search.png)
+
+### Topic Explorer
+![Topic Explorer](screenshots/topics.png)
 
 ## 4. Architecture
 
@@ -110,7 +110,7 @@ This suite checks rubric-critical edge cases for search, clustering bounds, netw
 ### Overview
 
 - Dataset summary statistics (posts, authors, subreddits, domains)
-- AI insight panel for non-technical narrative summary
+- Evidence cards for platform momentum, dataset rhythm, and turn signals
 
 ### Trend Analysis
 
@@ -232,7 +232,7 @@ The assignment requires examples where the query and correct result have zero ke
 | Rubric Requirement | Where Implemented |
 | --- | --- |
 | Documentation + usage | This README |
-| Public hosting proof | Section 2 (fill URLs before submit) |
+| Public hosting proof | Section 2 (live frontend + backend URLs) |
 | Time-series visualization | Trend Analysis page + /api/timeseries |
 | Network visualization + centrality | Network Analysis page + /api/network + PageRank/Louvain |
 | Dynamic GenAI summary under time-series | Trend Analysis auto summary + /api/summary |
@@ -248,7 +248,7 @@ The assignment requires examples where the query and correct result have zero ke
 
 - Additional platforms currently use adapter abstractions over the same core dataset; no separate live API ingestion yet
 - Offline real-world event overlays are not yet integrated
-- Public URLs and video link must be filled before submission
+- Video walkthrough link must be filled before final submission
 
 ## 12. AI Usage Log File
 
