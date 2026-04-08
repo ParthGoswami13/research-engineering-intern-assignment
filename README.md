@@ -39,6 +39,7 @@ Current deployed links:
 ![Topic Explorer](screenshots/topics.png)
 
 ## 4. Architecture
+![Topic Explorer](screenshots/architecture.png)
 
 - Frontend: React + Vite + Framer Motion + Recharts + D3
 - Backend: Flask REST API
